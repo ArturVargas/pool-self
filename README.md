@@ -61,7 +61,7 @@ forge test
 
 Other than writing unit tests (recommended!), you can only deploy & test hooks on [anvil](https://book.getfoundry.sh/anvil/) locally. Scripts are available in the `script/` directory, which can be used to deploy hooks, create pools, provide liquidity and swap tokens. The scripts support both local `anvil` environment as well as running them directly on a production network.
 
-### Executing locally with using **Anvil**:
+### Executing locally with using **Anvil**
 
 1. Start Anvil (or fork a specific chain using anvil):
 
@@ -84,13 +84,13 @@ forge script script/00_DeployHook.s.sol \
     --broadcast
 ```
 
-### Using **RPC URLs** (actual transactions):
+### Using **RPC URLs** (actual transactions)
 
 :::info
 It is best to not store your private key even in .env or enter it directly in the command line. Instead use the `--account` flag to select your private key from your keystore.
 :::
 
-### Follow these steps if you have not stored your private key in the keystore:
+### Follow these steps if you have not stored your private key in the keystore
 
 <details>
 
@@ -135,12 +135,13 @@ You will prompted to enter your wallet password, fill and press enter:
 Enter keystore password: <YOUR_PASSWORD>
 ```
 
-### Key Modifications to note:
+### Key Modifications to note
 
 1. Update the `token0` and `token1` addresses in the `BaseScript.sol` file to match the tokens you want to use in the network of your choice for sepolia and mainnet deployments.
 2. Update the `token0Amount` and `token1Amount` in the `CreatePoolAndAddLiquidity.s.sol` file to match the amount of tokens you want to provide liquidity with.
 3. Update the `token0Amount` and `token1Amount` in the `AddLiquidity.s.sol` file to match the amount of tokens you want to provide liquidity with.
 4. Update the `amountIn` and `amountOutMin` in the `Swap.s.sol` file to match the amount of tokens you want to swap.
+5. **For SelfFeeHook pools**: The `CreatePoolAndAddLiquidity.s.sol` script has been configured to use `DYNAMIC_FEE_FLAG` (0x800000) and the deployed SelfFeeHook address. Make sure to update `SELF_FEE_HOOK` constant if deploying to a different network.
 
 ### Verifying the hook contract
 
@@ -175,7 +176,7 @@ Or [adding the keys to your ssh-agent](https://docs.github.com/en/authentication
 
 Some versions of Foundry may limit contract code size to ~25kb, which could prevent local tests to fail. You can resolve this by setting the `code-size-limit` flag
 
-```
+```bash
 anvil --code-size-limit 40000
 ```
 
@@ -252,12 +253,14 @@ bytes memory hookData = abi.encode(proofPayload, userContextData);
 ```
 
 Where:
+
 - `proofPayload`: `bytes32 attestationId || proof data` (32 bytes attestationId + encoded proof)
 - `userContextData`: `bytes32 destChainId || bytes32 userIdentifier || additional data` (minimum 64 bytes)
 
 #### Events
 
 The hook emits `HookSwapMetrics` events for each swap containing:
+
 - Pool identifier
 - Verification status (true/false)
 - Applied fee (basis points)
@@ -280,10 +283,237 @@ This enables off-chain analytics and fee tracking for verified vs unverified swa
 - No user data is permanently stored on-chain
 - Verification uses Self's battle-tested zk-proof infrastructure
 
+### Fork Testing on Celo Mainnet
+
+This project supports forking Celo mainnet to test against real Uniswap v4 deployments. The RPC endpoint is configured in `foundry.toml`.
+
+**Important**: If you encounter "missing trie node" errors when forking, use a specific block number instead of the latest block. The block `50328785` (where the hook was deployed) is known to work reliably.
+
+#### Option 1: Using Anvil with Celo Fork (Recommended for Development)
+
+1. **Start Anvil with Celo fork**:
+
+   **Option A: Fork latest block** (may have missing state issues):
+   ```bash
+   anvil --fork-url https://celo.drpc.org --chain-id 42220
+   ```
+
+   **Option B: Fork specific block** (recommended for stability):
+   ```bash
+   # Fork at a specific block (replace BLOCK_NUMBER with a recent stable block)
+   anvil --fork-url https://celo.drpc.org --chain-id 42220 --fork-block-number 50328785
+   ```
+
+   **Option C: Use alternative RPC** (if primary RPC has issues):
+   ```bash
+   # Try other RPC endpoints if you encounter "missing trie node" errors
+   anvil --fork-url https://forno.celo.org --chain-id 42220 --fork-block-number 50328785
+   ```
+
+   This will fork Celo mainnet, so all contracts (including Self Hub) will exist at their real addresses.
+
+   **Troubleshooting "missing trie node" errors**:
+   - Use a block number from a few minutes/hours ago (not the latest block)
+   - Try a different RPC endpoint
+   - Increase the fork block number to a more stable/older block
+   - The block number `50328785` is known to work (from hook deployment)
+
+2. **Run tests against the fork**:
+
+   ```bash
+   forge test --fork-url http://localhost:8545 --match-path test/**/*.fork.t.sol -vv
+   ```
+
+3. **Deploy hook using the fork**:
+
+   **Option A: Use real Self Hub** (if it works correctly):
+   
+   ```bash
+   forge script script/00_DeployHook.s.sol \
+     --rpc-url http://localhost:8545 \
+     --private-key <PRIVATE_KEY> \
+     --broadcast
+   ```
+   
+   The script will automatically detect the fork and use the real Self Hub address from Celo.
+   
+   **Option B: Force use of mock hub** (if Self Hub fails in fork):
+   
+   1. First, deploy the mock hub:
+   
+   ```bash
+   forge script script/00_DeployMockHub.s.sol \
+     --rpc-url http://localhost:8545 \
+     --private-key <PRIVATE_KEY> \
+     --broadcast
+   ```
+   
+   2. Copy the mock hub address from the output
+   
+   3. Edit `script/00_DeployHook.s.sol` and set:
+      - `FORCE_USE_MOCK = true;` OR
+      - `EXISTING_MOCK_HUB = address(0xYourMockHubAddress);`
+   
+   4. Deploy the hook:
+   
+   ```bash
+   forge script script/00_DeployHook.s.sol \
+     --rpc-url http://localhost:8545 \
+     --private-key <PRIVATE_KEY> \
+     --broadcast
+   ```
+
+#### Option 1b: Using Anvil without Fork (Local Testing)
+
+If you want to test without a fork, start a clean Anvil instance:
+
+```bash
+anvil
+```
+
+**Option A: Deploy mock hub separately** (recommended for testing):
+
+```bash
+forge script script/00_DeployMockHub.s.sol \
+  --rpc-url http://localhost:8545 \
+  --private-key <PRIVATE_KEY> \
+  --broadcast
+```
+
+This will deploy the `MockIdentityVerificationHubV2` contract and print its address. You can then use this address in your tests or hook deployment.
+
+**Option B: Let the hook script deploy it automatically**:
+
+The `00_DeployHook.s.sol` script will automatically detect that no Self Hub exists and deploy a mock for you.
+
+#### Option 2: Direct Fork in Tests
+
+Tests can fork Celo directly using `vm.createSelectFork()`:
+
+```solidity
+function setUp() public {
+    vm.createSelectFork(vm.rpcUrl("celo"));
+    // Now you're on Celo mainnet fork
+}
+```
+
+Run fork tests:
+
+```bash
+forge test --match-path test/**/*.fork.t.sol -vv
+```
+
+#### Option 3: Using Environment Variables
+
+You can also set the RPC URL via environment variable:
+
+```bash
+export CELO_RPC_URL=https://celo.drpc.org
+forge test --fork-url $CELO_RPC_URL --match-path test/**/*.fork.t.sol
+```
+
+#### Celo Mainnet Contract Addresses
+
+When forking Celo, you can interact with real Uniswap v4 contracts:
+
+- **PoolManager**: `0x288dc841A52FCA2707c6947B3A777c5E56cd87BC`
+- **PositionManager**: `0xf7965f3981e4d5bc383bfbcb61501763e9068ca9`
+- **Permit2**: `0x000000000022D473030F116dDEE9F6B43aC78BA3`
+- **Self Identity Verification Hub V2**: `0xe57F4773bd9c9d8b6Cd70431117d353298B9f5BF`
+- **SelfFeeHook** (deployed): `0xb3D5b0efcB06f10309AB904d7aC01167f68C0088`
+  - **Salt**: `0x000000000000000000000000000000000000000000000000000000000000942b`
+  - **Verification Config ID**: `0x7b6436b0c98f62380866d9432c2af0ee08ce16a171bda6951aecd95ee1307d61`
+  - **Base Fee**: 10,000 bps (1.0%)
+  - **Discount Fee**: 3,000 bps (0.3%)
+  - **Scope**: `self-residency-pool`
+
+**Note**: These addresses are verified for Celo mainnet. The Self Hub address is used by the `SelfFeeHook` for identity verification. The `SelfFeeHook` is deployed and ready to use for creating dynamic fee pools.
+
+#### Creating a Pool with SelfFeeHook
+
+To create a pool using the deployed `SelfFeeHook`, follow these steps:
+
+**Step 1: Deploy Mock Tokens (if needed)**
+
+If you're testing locally or need new tokens, deploy them first:
+
+```bash
+forge script script/00_DeployMockTokens.s.sol \
+  --rpc-url http://localhost:8545 \
+  --private-key <PRIVATE_KEY> \
+  --broadcast
+```
+
+The script will output the deployed token addresses. Copy these addresses.
+
+**Step 2: Configure tokens** in `BaseScript.sol`:
+   - Update `token0` and `token1` with the addresses from Step 1 (or use existing token addresses):
+   ```solidity
+   IERC20 internal constant token0 = IERC20(0x...); // Your Token0 address
+   IERC20 internal constant token1 = IERC20(0x...); // Your Token1 address
+   ```
+   
+**Step 3: Configure liquidity amounts** in `01_CreatePoolAndAddLiquidity.s.sol`:
+   - Update `token0Amount` and `token1Amount` to your desired liquidity amounts:
+   ```solidity
+   uint256 public token0Amount = 100e18;
+   uint256 public token1Amount = 100e18;
+   ```
+
+**Step 4: Run the pool creation script**:
+   ```bash
+   forge script script/01_CreatePoolAndAddLiquidity.s.sol \
+     --rpc-url https://celo.drpc.org \
+     --account <YOUR_ACCOUNT> \
+     --broadcast
+   ```
+
+The script automatically:
+- Uses `DYNAMIC_FEE_FLAG` (0x800000) required for dynamic fee hooks
+- Configures the pool with the deployed `SelfFeeHook` address (`0xb3D5b0efcB06f10309AB904d7aC01167f68C0088`)
+- Creates the pool and adds initial liquidity in a single transaction
+
+**Important**: The pool will use dynamic fees controlled by the hook:
+- **Base fee**: 1% (10,000 bps) for users without Self proof
+- **Discount fee**: 0.3% (3,000 bps) for users with valid Self proof
+
+**Note**: Make sure you have approved the tokens for the PositionManager before running the pool creation script, or ensure the script handles approvals automatically.
+
+#### Fork Testing Tips
+
+- **Block Number**: You can fork at a specific block for consistency. Using a specific block helps avoid "missing trie node" errors:
+
+  ```solidity
+  // Use a recent stable block (e.g., block where hook was deployed)
+  vm.createSelectFork(vm.rpcUrl("celo"), 50328785);
+  ```
+
+- **Handling "missing trie node" errors**:
+  - These errors occur when the RPC doesn't have the complete state for a block
+  - Solution: Use a block number that's a few minutes/hours old (not the absolute latest)
+  - The block where the hook was deployed (`50328785`) is known to work
+  - Alternative: Try a different RPC endpoint
+
+- **Gas Limits**: Fork tests may need higher gas limits:
+
+  ```bash
+  forge test --fork-url https://celo.drpc.org --gas-limit 30000000
+  ```
+
+- **Skip Tests**: Use `skip()` in tests to handle cases where fork is not available:
+
+  ```solidity
+  if (!forked) {
+      skip("Celo mainnet fork not available");
+  }
+  ```
+
 ### Additional Resources
 
 - [Uniswap v4 docs](https://docs.uniswap.org/contracts/v4/overview)
 - [Self.xyz Documentation](https://docs.self.xyz)
+- [Foundry Book - Forking](https://book.getfoundry.sh/forge/fork-testing)
+- [Celo Network Info](https://celo.drpc.org)
 - [v4-periphery](https://github.com/uniswap/v4-periphery)
 - [v4-core](https://github.com/uniswap/v4-core)
 - [v4-by-example](https://v4-by-example.org)

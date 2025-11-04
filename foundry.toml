@@ -9,6 +9,9 @@ solc_version = "0.8.28"
 src = "src"
 via_ir = false
 
+[rpc_endpoints]
+celo = "https://celo.drpc.org"
+
 [lint]
 exclude_lints = ["screaming-snake-case-immutable", "screaming-snake-case-const"]
 lint_on_build = false

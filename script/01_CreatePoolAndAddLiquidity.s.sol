@@ -5,18 +5,28 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {CurrencyLibrary, Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
 import {BaseScript} from "./base/BaseScript.sol";
 import {LiquidityHelpers} from "./base/LiquidityHelpers.sol";
 
 contract CreatePoolAndAddLiquidityScript is BaseScript, LiquidityHelpers {
     using CurrencyLibrary for Currency;
+    using LPFeeLibrary for uint24;
 
     /////////////////////////////////////
     // --- Configure These ---
     /////////////////////////////////////
 
-    uint24 lpFee = 3000; // 0.30%
+    // DYNAMIC_FEE_FLAG is required for SelfFeeHook
+    // This signals that the pool uses dynamic fees (set by the hook)
+    uint24 constant DYNAMIC_FEE_FLAG = 0x800000;
+    
+    // SelfFeeHook deployed on Celo mainnet
+    // Update this address if deploying to a different network
+    address constant SELF_FEE_HOOK = address(0xb3D5b0efcB06f10309AB904d7aC01167f68C0088);
+    
     int24 tickSpacing = 60;
     uint160 startingPrice = 2 ** 96; // Starting price, sqrtPriceX96; floor(sqrt(1) * 2^96)
 
@@ -30,12 +40,18 @@ contract CreatePoolAndAddLiquidityScript is BaseScript, LiquidityHelpers {
     /////////////////////////////////////
 
     function run() external {
+        // Verify that we're using dynamic fee flag
+        require(DYNAMIC_FEE_FLAG.isDynamicFee(), "Fee must be DYNAMIC_FEE_FLAG");
+        
+        // Use SelfFeeHook instead of hookContract from BaseScript
+        IHooks hooks = IHooks(SELF_FEE_HOOK);
+        
         PoolKey memory poolKey = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: lpFee,
+            fee: DYNAMIC_FEE_FLAG, // Required for dynamic fee hooks
             tickSpacing: tickSpacing,
-            hooks: hookContract
+            hooks: hooks
         });
 
         bytes memory hookData = new bytes(0);
