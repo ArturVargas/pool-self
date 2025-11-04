@@ -1,3 +1,20 @@
+# Self Fee Hook for Uniswap v4
+
+**A Uniswap v4 hook that provides discounted trading fees for users who verify their identity using Self.xyz 🦄**
+
+### Overview
+
+`SelfFeeHook` is a dynamic fee hook that rewards users with **70% fee reduction** when they present a valid Self identity verification proof during swaps. This hook integrates with [Self.xyz](https://self.xyz) to enable privacy-preserving identity verification without revealing personal information.
+
+### Key Features
+
+- **Identity-Based Fee Discounts**: Users with valid Self proofs receive 0.3% fee instead of the standard 1%
+- **Privacy-Preserving**: Uses zero-knowledge proofs - no personal data is stored on-chain
+- **Non-Blocking**: Swaps always execute even if verification fails - users simply pay the standard fee
+- **Dynamic Fee Pools Only**: Requires pools configured with dynamic fees (`fee = 0x800000`)
+
+---
+
 # Uniswap v4 Hook Template
 
 **A template for writing Uniswap v4 Hooks 🦄**
@@ -10,6 +27,7 @@ This template provides a starting point for writing Uniswap v4 Hooks, including 
 
 1. The example hook [Counter.sol](src/Counter.sol) demonstrates the `beforeSwap()` and `afterSwap()` hooks
 2. The test template [Counter.t.sol](test/Counter.t.sol) preconfigures the v4 pool manager, test tokens, and test liquidity.
+3. The [SelfFeeHook.sol](src/SelfFeeHook.sol) demonstrates identity-based dynamic fee adjustments using Self.xyz verification
 
 <details>
 <summary>Updating to v4-template:latest</summary>
@@ -175,9 +193,97 @@ Hook deployment failures are caused by incorrect flags or incorrect salt mining
 
 </details>
 
+### SelfFeeHook Documentation
+
+#### How It Works
+
+The `SelfFeeHook` operates on **dynamic fee pools** in Uniswap v4. When a user performs a swap:
+
+1. **Without Self Proof**: The hook applies the **base fee of 1%** (10,000 basis points)
+2. **With Valid Self Proof**: The hook verifies the identity proof and applies a **discounted fee of 0.3%** (3,000 basis points) - a **70% discount**
+
+The verification happens synchronously during the swap execution. If verification fails or no proof is provided, the swap still executes successfully with the base fee.
+
+#### Pool Requirements
+
+**Important**: This hook **only works with dynamic fee pools**. When creating a pool that uses `SelfFeeHook`, you must set the pool's fee to the dynamic fee flag:
+
+```solidity
+PoolKey memory key = PoolKey({
+    currency0: token0,
+    currency1: token1,
+    fee: 0x800000,  // DYNAMIC_FEE_FLAG - required for dynamic fee hooks
+    tickSpacing: 60,
+    hooks: IHooks(address(selfFeeHook))
+});
+```
+
+#### Self.xyz Integration
+
+The hook integrates with [Self.xyz](https://self.xyz) identity verification infrastructure:
+
+- **Self Verification Hub V2**: Handles zero-knowledge proof verification
+- **Privacy-Preserving**: Uses zk-proofs - no personal information is stored on-chain
+- **User Context Data**: Users provide proof data encoded as `abi.encode(proofPayload, userContextData)`
+
+#### Usage Flow
+
+1. User obtains Self identity verification proof (typically via QR code scan)
+2. Frontend encodes the proof data into the swap's `hookData` parameter
+3. Swap is executed with the proof data
+4. Hook verifies the proof synchronously during swap execution
+5. If valid, discount is applied; if invalid or missing, base fee is charged
+
+#### Fee Structure
+
+| User Status | Fee Applied | Basis Points |
+|------------|------------|--------------|
+| No proof / Invalid proof | Base fee | 10,000 (1.0%) |
+| Valid Self proof | Discount fee | 3,000 (0.3%) |
+
+**Discount**: 70% reduction for verified users
+
+#### Hook Data Format
+
+When executing a swap with Self verification, encode the proof data as follows:
+
+```solidity
+bytes memory hookData = abi.encode(proofPayload, userContextData);
+```
+
+Where:
+- `proofPayload`: `bytes32 attestationId || proof data` (32 bytes attestationId + encoded proof)
+- `userContextData`: `bytes32 destChainId || bytes32 userIdentifier || additional data` (minimum 64 bytes)
+
+#### Events
+
+The hook emits `HookSwapMetrics` events for each swap containing:
+- Pool identifier
+- Verification status (true/false)
+- Applied fee (basis points)
+- Notional swap amount
+- Calculated fee amount
+- Block timestamp
+
+This enables off-chain analytics and fee tracking for verified vs unverified swaps.
+
+#### Gas Considerations
+
+- Swaps without proof: Standard swap gas costs
+- Swaps with proof: Additional gas for verification (~50k-100k gas depending on proof complexity)
+- No persistent storage: The hook uses temporary flags to avoid gas overhead from state updates
+
+#### Security Notes
+
+- The hook never reverts swaps due to verification failures
+- Each swap's verification is independent and atomic
+- No user data is permanently stored on-chain
+- Verification uses Self's battle-tested zk-proof infrastructure
+
 ### Additional Resources
 
 - [Uniswap v4 docs](https://docs.uniswap.org/contracts/v4/overview)
+- [Self.xyz Documentation](https://docs.self.xyz)
 - [v4-periphery](https://github.com/uniswap/v4-periphery)
 - [v4-core](https://github.com/uniswap/v4-core)
 - [v4-by-example](https://v4-by-example.org)
